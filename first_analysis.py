@@ -50,3 +50,12 @@ print(f"Naive measurement found:    0.0766")
 print(f"Regression found m1 (ad):   {m1:.4f}")
 print(f"Regression found m2 (tech): {m2:.4f}")
 print(f"Baseline c:                 {c[0]:.4f}")
+
+import math
+
+odds_ratio_ad = math.exp(m1)
+odds_ratio_tech = math.exp(m2)
+
+print(f"\n--- Business Language ---")
+print(f"Ad effect: users who saw the ad were {odds_ratio_ad:.2f}x more likely to buy")
+print(f"Tech savvy effect: high tech savvy users were {odds_ratio_tech:.2f}x more likely to buy")

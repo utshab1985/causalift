@@ -26,6 +26,21 @@ class CausalLift:
         self.model.fit(X, y)
 
         # Extract coefficients
+        # Calculate naive effect (without controlling for confounders)
+        X_naive = data[[self.treatment]].values
+        naive_model = LogisticRegression()
+        naive_model.fit(X_naive, y)
+        self.results['naive_odds_ratio'] = math.exp(naive_model.coef_[0][0])
+
+        # Calculate confounding severity (R² of treatment ~ confounders)
+        from sklearn.linear_model import LinearRegression
+        from sklearn.metrics import r2_score
+        X_conf = data[self.confounders].values
+        X_treat = data[self.treatment].values
+        conf_model = LinearRegression()
+        conf_model.fit(X_conf, X_treat)
+        r2 = r2_score(X_treat, conf_model.predict(X_conf))
+        self.results['confounding_severity'] = r2
         self.results['treatment_effect_log_odds'] = self.model.coef_[0][0]
         self.results['treatment_odds_ratio'] = math.exp(self.model.coef_[0][0])
         self.results['confounder_odds_ratios'] = [
@@ -34,10 +49,29 @@ class CausalLift:
 
         return self
 
+    
     def summary(self):
-        odds = self.results['treatment_odds_ratio']
+        naive = self.results['naive_odds_ratio']
+        corrected = self.results['treatment_odds_ratio']
+        severity = self.results['confounding_severity'] * 100
+        
         print(f"\n--- CausalLift Results ---")
-        print(f"True causal effect of '{self.treatment}':")
-        print(f"Users exposed were {odds:.2f}x more likely to convert")
-        print(f"(Controlling for: {self.confounders})")
+        print(f"Naive effect (uncorrected):     {naive:.2f}x")
+        print(f"True causal effect (corrected): {corrected:.2f}x")
+        print(f"Confounding severity score:     {severity:.1f}%")
+        print()
+        
+        if severity < 5:
+            verdict = "LOW - naive measurement was mostly reliable"
+        elif severity < 20:
+            verdict = "MEDIUM - naive measurement was somewhat misleading"
+        else:
+            verdict = "HIGH - naive measurement was seriously wrong"
+        
+        print(f"Verdict: {verdict}")
+        print()
+        print(f"Without CausalLift you would have reported {naive:.2f}x")
+        print(f"The true effect is {corrected:.2f}x")
+        print(f"You were off by {abs(naive-corrected):.2f}x")
         return self
+        

@@ -28,4 +28,6 @@ model = CausalLift(
     confounders=['tech_savvy']
 )
 
-model.fit(data).summary()
+model.fit(data)
+model.ate(data)
+model.summary()

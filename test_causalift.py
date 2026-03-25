@@ -32,6 +32,7 @@ model.check_assumptions(data)
 model.fit(data)
 model.ate(data)
 model.hte(data)
+model.propensity_score_ate(data)
 model.summary()
 
 print("\n--- Predict effect for specific users ---")

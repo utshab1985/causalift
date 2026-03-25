@@ -101,6 +101,71 @@ class CausalLift:
             print("Overall: SOME CHECKS FAILED - interpret results carefully")
         
         return self
+    
+    def propensity_score_ate(self, data):
+        """
+        Calculate ATE using Inverse Probability Weighting.
+        Alternative to regression-based ATE.
+        Rosenbaum & Rubin (1983).
+        """
+        import numpy as np
+        from sklearn.linear_model import LogisticRegression
+        
+        # Step 1: Estimate propensity scores
+        # P(treatment=1 | confounders)
+        X_conf = data[self.confounders].values
+        T = data[self.treatment].values
+        Y = data[self.outcome].values
+        
+        ps_model = LogisticRegression()
+        ps_model.fit(X_conf, T)
+        
+        # Propensity score for each person
+        propensity_scores = ps_model.predict_proba(X_conf)[:, 1]
+        
+        # Store for diagnostics
+        self.results['propensity_scores'] = propensity_scores
+        self.results['propensity_score_mean'] = propensity_scores.mean()
+        self.results['propensity_score_std'] = propensity_scores.std()
+        
+        # Step 2: Inverse Probability Weighting
+        # Clip propensity scores to avoid division by near-zero
+        # This is called trimming - standard practice
+        ps_clipped = np.clip(propensity_scores, 0.01, 0.99)
+        
+        # IPW formula
+        treated_weight = (T * Y) / ps_clipped
+        control_weight = ((1 - T) * Y) / (1 - ps_clipped)
+        
+        ipw_ate = (treated_weight - control_weight).mean()
+        self.results['propensity_score_ate'] = ipw_ate
+        
+        # Step 3: Doubly Robust Estimator
+        # Combines regression predictions with IPW correction
+        if 'ate' not in self.results:
+            self.ate(data)
+        
+        # Regression predictions
+        features = [self.treatment] + self.confounders
+        
+        data_treated = data[features].copy()
+        data_treated[self.treatment] = 1
+        data_control = data[features].copy()
+        data_control[self.treatment] = 0
+        
+        mu1 = self.model.predict_proba(data_treated.values)[:, 1]
+        mu0 = self.model.predict_proba(data_control.values)[:, 1]
+        
+        # Doubly robust correction
+        dr_ate = (
+            mu1 - mu0 +
+            T * (Y - mu1) / ps_clipped -
+            (1 - T) * (Y - mu0) / (1 - ps_clipped)
+        ).mean()
+        
+        self.results['doubly_robust_ate'] = dr_ate
+        
+        return self
 
     def fit(self, data):
         features = [self.treatment] + self.confounders
@@ -264,4 +329,32 @@ class CausalLift:
             print(f"Low responder profile:")
             for k, v in self.results['low_responder_profile'].items():
                 print(f"  Average {k}: {v:.2f}")
+        if 'propensity_score_ate' in self.results:
+            print(f"\n--- Robustness Check ---")
+            reg_ate = self.results['ate'] * 100
+            ps_ate = self.results['propensity_score_ate'] * 100
+            dr_ate = self.results['doubly_robust_ate'] * 100
+            
+            print(f"Regression ATE:      {reg_ate:.1f} per 100")
+            print(f"Propensity Score ATE:{ps_ate:.1f} per 100")
+            print(f"Doubly Robust ATE:   {dr_ate:.1f} per 100")
+            print()
+            
+            # Check agreement
+            max_diff = max(
+                abs(reg_ate - ps_ate),
+                abs(reg_ate - dr_ate),
+                abs(ps_ate - dr_ate)
+            )
+            
+            if max_diff < 1.0:
+                print(f"All three methods agree (max difference: {max_diff:.2f})")
+                print(f"Result is ROBUST — high confidence in causal estimate")
+            elif max_diff < 3.0:
+                print(f"Methods mostly agree (max difference: {max_diff:.2f})")
+                print(f"Result is MODERATELY ROBUST")
+            else:
+                print(f"WARNING: Methods disagree (max difference: {max_diff:.2f})")
+                print(f"One model may be misspecified — investigate further")
+
         return self
